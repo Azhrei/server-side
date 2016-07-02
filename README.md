@@ -18,7 +18,7 @@ exception.  The goal is for this to be generic enough that it can be
 used by other RPTools applications in the future.
 
 ## Step 1
-MapTool contacts this script and provides:
+MapTool contacts this script (via POST) and provides:
 * its version number,
 * a timestamp, and
 * a checksum of the unencrypted stacktrace text.
@@ -27,21 +27,26 @@ If we already have the checksum in our database,
 it means the crash is a duplicate and we can tell MT not to bother
 sending it.
 
-A digest of the above using some string built into MT as the salt
-ensures the request is valid (a spammer wouldn't know how to build
-the digest without MT source code so we can eliminate the fake
-request early).  This could be the MT version number, MT's timestamp
-value, or a previously defined shared secret.  Or some combination of
-the above.  All that's important is that a spammer won't know what it is
-without looking at MT's source code.
+A digest of the above using some salt built into MT ensures the
+request is valid -- a spammer wouldn't know how to build the digest
+without MT source code.  The salt could be the MT version number,
+MT's timestamp value, a previously defined shared secret, or some
+combination of any of these.  All that's important is that a spammer
+won't know what it is without looking at MT's source code.  (In a web
+application, this communication would be over HTTPS but RPTools is not
+going to pay for a certificate!  We *could* have MT generate a
+public/private key pair on the fly and send its public key to the server
+so that all traffic was encrypted, but this is a lot of extra cpu work
+without much payoff -- we're only trying to weed out spammers, after
+all.)
 
     {
-	"body": {
-	    "version": "1.4.0.1",
-	    "timestamp": 123456789,
-	    "checksum": 987654321
-	},
-	"digest": "7a6f548e9237d990c876a"
+        "body": {
+            "version": "1.4.0.1",
+            "timestamp": 123456789,
+            "checksum": 987654321
+        },
+        "digest": "7a6f548e9237d990c876a"
     }
 
 ## Step 2
@@ -61,17 +66,17 @@ to be passed back and forth each time, but the digest protects the
 autheniticity of the value so it can't be corrupted externally.)
 
     {
-	"body": {
-	    "publickey": "12345abcdef6789",
-	    "hash": "827648d9a866f8e9c",
-	    "timestamp": 123458294,
-	    "url": THIS_SCRIPT + "?_=" + RANDOM_NUMBER
-	},
-	"digest": "2345263456345"
+        "body": {
+            "publickey": "12345abcdef6789",
+            "hash": "827648d9a866f8e9c",
+            "timestamp": 123458294,
+            "url": THIS_SCRIPT + "?_=" + RANDOM_NUMBER
+        },
+        "digest": "2345263456345"
     }
 
 ## Step 3
-Now MT encrypts the ZIP file using the public key and POSTs it to the
+Now MT encrypts the ZIP file using the public key and PUT's it to the
 server.  The server can verify the checksum of the stacktrace inside
 the ZIP and compare it to the checksum in the first exchange.  If
 they don't match, we can ignore the uploaded file and send an error
@@ -89,7 +94,7 @@ about the upload if unsuccessful in the first couple of attempts.
 Once we have the uploaded ZIP file, we arrange to get it to the
 developers, perhaps by attaching it to a github issue?  The ZIP file
 should include two files:
-* the sanitized output from the *Help>Debug* menu option within MT, and
+* the sanitized output from the **Help>Debug** menu option within MT, and
 * the UTF-8 text contents of the stacktrace itself.
 
 Over time we may find it necessary to add more info.
