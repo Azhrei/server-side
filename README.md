@@ -43,7 +43,7 @@ all.)
     {
         "body": {
             "version": "1.4.0.1",
-            "timestamp": 123456789,
+            "clienttime": 123456789,
             "checksum": 987654321
         },
         "digest": "7a6f548e9237d990c876a"
@@ -69,18 +69,21 @@ autheniticity of the value so it can't be corrupted externally.)
         "body": {
             "publickey": "12345abcdef6789",
             "hash": "827648d9a866f8e9c",
-            "timestamp": 123458294,
+            "clienttime": 123456789,
+            "servertime": 123458294,
             "url": THIS_SCRIPT + "?_=" + RANDOM_NUMBER
         },
         "digest": "2345263456345"
     }
 
 ## Step 3
-Now MT encrypts the ZIP file using the public key and PUT's it to the
-server.  The server can verify the checksum of the stacktrace inside
-the ZIP and compare it to the checksum in the first exchange.  If
-they don't match, we can ignore the uploaded file and send an error
-back to MT.
+Now MT encrypts the ZIP file using the public key and PUT's it to
+the server, passing the hashed **servertime** in the *QUERY_STRING*.
+If the **servertime** is outside the required time frame, the server
+ignores the uploaded file.  The server can also verify the checksum
+of the stacktrace inside the ZIP and compare it to the checksum in
+the first exchange.  If they don't match, the server can ignore the
+uploaded file and send an error back to MT.
 
 ## Review
 Throughout all of the above steps, there should be a relatively short
@@ -89,6 +92,10 @@ starting timestamp into the conversation so that either end can
 timeout without acknowledgment from the other end.  MT should
 probably only try once or twice to upload the file and should forget
 about the upload if unsuccessful in the first couple of attempts.
+
+Note that the size of the uploaded ZIP file should be very small; the
+contents are 100% text and will compress well, and none of the JSON
+structures shown above will be larger than a few hundred bytes at most.
 
 ## Conclusion
 Once we have the uploaded ZIP file, we arrange to get it to the
