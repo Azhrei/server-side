@@ -26,4 +26,33 @@ function calcDigest($obj, $salt = "RPTools.net")
 	failure("Missing digest method?");
     }
 }
+
+function generateKeyPair() {
+    $config = array(
+	"digest_alg" => DIGEST_METHOD,
+	"private_key_bits" => 2048,
+	// Would prefer DSA here but docs say "unimplemented"
+	// RSA has been mathematically shown to be vulnerable, although
+	// no known exploits have been found.  Yet. [circa 2016]
+	"private_key_type" => OPENSSL_KEYTYPE_RSA,
+    );
+    $res = openssl_pkey_new($config);
+    openssl_pkey_export($res, $privKey);
+    $pubKey = openssl_pkey_get_details($res);
+    $pubKey = $pubKey["key"];
+    return array($privKey, $pubKey);
+}
+
+function encryptWithPublic($msg, $pubKey = $_SESSION["pubKey"])
+{
+    openssl_public_encrypt($msg, $encrypted, $pubKey);
+    return $encrypted;
+}
+
+function decryptWithPrivate($encrypted, $privKey = $_SESSION["privKey"])
+{
+    openssl_private_decrypt($encrypted, $msg, $privKey);
+    return $msg;
+}
+
 ?>

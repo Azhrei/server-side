@@ -112,6 +112,42 @@ if (!isset($_SESSION["MT_VERSION"])) {
 	failure("Digest mismatch");
     }
     print "Success.  So far. :)\n";
+
+    // If we get here, then the Phase 1a (incoming Phase 1) message is
+    // validated.  Now we generate a public/private key and send it back
+    // to the client, as follows:
+    //	{ "body": {
+    //		"publickey": "...",
+    //		"clienttime": "...",
+    //		"servertime": "...",
+    //		"url": "..."
+    //	  },
+    //	  "digest": "..."
+    //	}
+
+    // Begin Phase 1b:  sending our response.
+    $keys = generateKeyPair();
+    $_SESSION["privKey"] = $keys[0];
+    $_SESSION["pubKey"] = $keys[1];
+    $_SESSION["servertime"] = time();
+
+    $random = calcDigest($_SESSION["pubKey"]);
+    $random = substr($random, 0, 16);
+
+    $body = array(
+	"publickey": $_SESSION["pubKey"],
+	"clienttime": $body["clienttime"],
+	"servertime": $_SESSION["servertime"],
+	"url": $_SERVER["SCRIPT_FILENAME"] + "?r=" + $random
+    );
+    $json = array(
+	"body": $body,
+	"digest": calcDigest($body),
+    );
+    print($json);
+    print "\n";
+
+
 }
 
 ?>
