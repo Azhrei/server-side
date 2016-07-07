@@ -29,29 +29,39 @@ function calcDigest($obj, $salt = "RPTools.net")
 
 function generateKeyPair() {
     $config = array(
-	"digest_alg" => DIGEST_METHOD,
+	"digest_alg" => OPENSSL_ALGO_SHA512,
 	"private_key_bits" => 2048,
 	// Would prefer DSA here but docs say "unimplemented"
 	// RSA has been mathematically shown to be vulnerable, although
 	// no known exploits have been found.  Yet. [circa 2016]
 	"private_key_type" => OPENSSL_KEYTYPE_RSA,
     );
-    $res = openssl_pkey_new($config);
+    global $php_errormsg;
+    $res = openssl_pkey_new();
+    print "php_errormsg: '$php_errormsg'\n";
+    while ($msg = openssl_error_string())
+	echo "\t$msg\n";
+    if (!$res)
+	failure("Can't create keypair?!");
     openssl_pkey_export($res, $privKey);
     $pubKey = openssl_pkey_get_details($res);
     $pubKey = $pubKey["key"];
     return array($privKey, $pubKey);
 }
 
-function encryptWithPublic($msg, $pubKey = $_SESSION["pubKey"])
+function encryptWithPublic($msg, $pubKey = FALSE)
 {
-    openssl_public_encrypt($msg, $encrypted, $pubKey);
+    openssl_public_encrypt($msg,
+	$encrypted,
+	$pubKey ? $pubKey : $_SESSION["pubKey"]);
     return $encrypted;
 }
 
-function decryptWithPrivate($encrypted, $privKey = $_SESSION["privKey"])
+function decryptWithPrivate($encrypted, $privKey = FALSE)
 {
-    openssl_private_decrypt($encrypted, $msg, $privKey);
+    openssl_private_decrypt($encrypted,
+	$msg,
+	$privKey ? $privKey : $_SESSION["privKey"]);
     return $msg;
 }
 

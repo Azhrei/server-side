@@ -135,14 +135,14 @@ if (!isset($_SESSION["MT_VERSION"])) {
     $random = substr($random, 0, 16);
 
     $body = array(
-	"publickey": $_SESSION["pubKey"],
-	"clienttime": $body["clienttime"],
-	"servertime": $_SESSION["servertime"],
-	"url": $_SERVER["SCRIPT_FILENAME"] + "?r=" + $random
+	"publickey"  => $_SESSION["pubKey"],
+	"clienttime" => $body["clienttime"],
+	"servertime" => $_SESSION["servertime"],
+	"url"        => $_SERVER["SCRIPT_FILENAME"] + "?r=" + $random
     );
     $json = array(
-	"body": $body,
-	"digest": calcDigest($body),
+	"body"   => $body,
+	"digest" => calcDigest($body),
     );
     print($json);
     print "\n";
