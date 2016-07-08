@@ -38,14 +38,14 @@ include_once("digest.php");
  *
  *	{ "body": {
  *		"publickey": "12345abcdef6789",
- *		"hash": "827648d9a866f8e9c",
- *		"timestamp": 123458294,
- *		"url": "/this_script.php?_=12345"
+ *		"servertime": 123456789,
+ *		"servertime": 123458294,
+ *		"url": "/this_script.php?r=<hash_of_pubkey>"
  *		},
  *	  "digest": "2345263456345"
  *	}
  *
- * Now MT encrypts the ZIP file using the public key and POSTs it to the
+ * Now MT encrypts the ZIP file using the public key and PUT's it to the
  * server.  The server can verify the checksum of the stacktrace inside
  * the ZIP and compare it to the checksum in the first exchange.  If
  * they don't match, we can ignore the uploaded file and send an error
@@ -76,16 +76,19 @@ class StackTrace {
 };
 
 function failure($msg) {
-    print "$msg\n";
+    print("$msg\n");
     exit(1);
 }
 
 // Incoming request.  Determine whether it's part of Phase 1 or Phase 2
 // and forward it to the right routine.
-session_start();
-if (!isset($_SESSION["MT_VERSION"])) {
-    // Phase 1 -- initial connection.
+$random = getFormVar_GET("r");
+if (!isset($random)) {
+    // Initial contact.  Create session and validate POST data.
+    session_destroy();
+    session_start();
 
+    // Phase 1 -- initial connection.
     $data = getFormVar("json");	// Checks SESSION->POST->GET->CmdLine
     if (!$data)
 	failure("Empty POST");
@@ -103,19 +106,26 @@ if (!isset($_SESSION["MT_VERSION"])) {
 
     // If all of the above is correct, calculate the hash digest and
     // compare it against what just came in.  If they match, begin Phase
-    // 2.  If they don't match, destroy this session and ignore the
+    // 1b.  If they don't match, destroy this session and ignore the
     // incoming request -- don't even send an error message back.  We
     // may as well let an attack just linger. :)
     $digest = calcDigest($body);
     if ($digest !== $json["digest"]) {
-	print_r($digest);
+	session_destroy();
+	print_r($digest);		// Remove all output later...
 	failure("Digest mismatch");
+    }
+    // Look in the database to see if we already have this
+    // version/checksum because if we do, we can refuse this new one...
+    if (checkForRecord("maptool", $body["version"], $body["checksum"])) {
+	print("Nothing to do.\n");
+	exit(0);
     }
     print "Success.  So far. :)\n";
 
     // If we get here, then the Phase 1a (incoming Phase 1) message is
-    // validated.  Now we generate a public/private key and send it back
-    // to the client, as follows:
+    // validated.  Now we generate a public/private key and send the
+    // public half back to the client, as follows:
     //	{ "body": {
     //		"publickey": "...",
     //		"clienttime": "...",
@@ -130,9 +140,11 @@ if (!isset($_SESSION["MT_VERSION"])) {
     $_SESSION["privKey"] = $keys[0];
     $_SESSION["pubKey"] = $keys[1];
     $_SESSION["servertime"] = time();
+    $_SESSION["version"] = $body["version"];
+    $_SESSION["checksum"] = $body["checksum"];
 
     $random = calcDigest($_SESSION["pubKey"]);
-    $random = substr($random, 0, 16);
+    //$random = substr($random, 0, 16);
 
     $body = array(
 	"publickey"  => $_SESSION["pubKey"],
@@ -146,8 +158,83 @@ if (!isset($_SESSION["MT_VERSION"])) {
     );
     print($json);
     print "\n";
+    exit(0);
+}
+// Only get here if we are invoked with "?r=..." in the URL.
+// The client should send us the encrypted data.  We decrypt it
+// and process it appropriately.  For this application, that
+// means verifying the checksum of the info inside the ZIP and
+// then adding it to a developer-visible area.
 
+// If we don't have anything in $_FILES, this is invalid.
+if (!isset($_FILES) || count($_FILES) != 1)
+    failure("Protocol error 1.");	// Must have POST-uploaded file
+if (!isset($_FILES["zipfile"]))
+    failure("Protocol error 2.");	// Field name must be "zipfile"
+if ($_FILES["zipfile"]["error"] != UPLOAD_ERR_OK)
+    failure("Protocol error 3.");	// Upload must be successful
 
+$fobj = $_FILES["zipfile"];
+$arr = explode(".", $fobj["name"]);
+if ($arr[ count($arr)-1 ] != "zip")
+    failure("Protocol error 4.");	// Filename extension must be "zip"
+
+// Access the session and verify it has the correct fields in it.
+session_start();
+$fields = ["pubKey", "privKey", "servertime", "version", "checksum"];
+foreach ($fields as $f) {
+    if (!isset(_$SESSION[$f])) {
+	//session_destroy();
+	failure("Corrupt session.");
+    }
+}
+if ($random !== calcDigest($_SESSION["pubKey"])) {
+    session_destroy();
+    failure("Invalid parameter.");
+}
+// Since the hash has been validated, we know the pubKey comes from us,
+// which means the session variables should be valid.  Which means the
+// code above (Phase 1a) has already executed and we've determined that
+// this entry is not already in the database.  However, it's possible
+// someone else uploaded the same stacktrace while we were, so we check
+// it again, just to be sure, and create the record immediately.
+//
+// There's no race condition here because we will attempt to insert a
+// new record and check the error status to determine if it's already
+// there, but we don't want to do this unless our other validations
+// succeed, since db access is going to be a potential bottleneck.
+if (checkAndCreateRecord("maptool",
+    $_SESSION["version"], $_SESSION["checksum"])) {
+	session_destroy();
+	failure("Duplicate stacktrace.");
 }
 
+// Uploaded data looks good and it's not a duplicate.  Let's process it!
+$upload_dir = "./logs";
+$upload_file = $upload_dir . basename($_FILES["zipfile"]["name"]);
+if (!move_uploaded_file($_FILES["zipfile"]["tmp_name"], $upload_file))
+    failure("Couldn't move uploaded file.");
+
+// Decrypt the original file and write the new one right back on top of
+// the original!
+$encrypted = file_get_contents($upload_file);
+$decrypted = decryptWithPrivate($encrypted);
+file_put_contents($upload_file, $decrypted);
+
+$debuginfo = file_get_contents("zip://${upload_file}#debuginfo.txt");
+$exception = file_get_contents("zip://${upload_file}#exception.txt");
+
+// Make sure the client isn't trying to pull a fast one; verify that our
+// checksum matches what we expected it to be.
+$checksum = calcDigest($exception);
+if ($_SESSION["checksum"] !== $checksum)
+    failure("Checksums don't match.");
+
+// Everything looks good, so write the stacktrace where the developers
+// can find it.
+updateRecord("maptool", $_SESSION["version"], $checksum,
+    $debuginfo, $exception);
+
+print("Success.\n");
+exit(0);
 ?>
