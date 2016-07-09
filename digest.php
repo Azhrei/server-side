@@ -1,5 +1,7 @@
 <?php
 
+if (!defined('IN_RPTOOLS')) die("Hacking attempt");
+
 define('DIGEST_METHOD', "sha512");
 
 /**

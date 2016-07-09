@@ -3,6 +3,7 @@
 define('IN_RPTOOLS', 1);	// Global flag set in all entry points
 include_once("getVar.php");
 include_once("digest.php");
+include_once("recordKeeping.php");
 
 /**
  * This module represents an AJAX interface to be used by MapTool when
@@ -183,7 +184,7 @@ if ($arr[ count($arr)-1 ] != "zip")
 session_start();
 $fields = ["pubKey", "privKey", "servertime", "version", "checksum"];
 foreach ($fields as $f) {
-    if (!isset(_$SESSION[$f])) {
+    if (!isset($_SESSION[$f])) {
 	//session_destroy();
 	failure("Corrupt session.");
     }
@@ -203,7 +204,12 @@ if ($random !== calcDigest($_SESSION["pubKey"])) {
 // new record and check the error status to determine if it's already
 // there, but we don't want to do this unless our other validations
 // succeed, since db access is going to be a potential bottleneck.
-if (checkAndCreateRecord("maptool",
+//
+// We specifically start a transaction so that if we don't commit it
+// ourselves at the end of this script, it will automaitcally be rolled
+// back and we don't have to delete the record ourselves. :)
+DB::start_transaction();
+if (DB::checkAndCreateRecord("maptool",
     $_SESSION["version"], $_SESSION["checksum"])) {
 	session_destroy();
 	failure("Duplicate stacktrace.");
@@ -212,8 +218,11 @@ if (checkAndCreateRecord("maptool",
 // Uploaded data looks good and it's not a duplicate.  Let's process it!
 $upload_dir = "./logs";
 $upload_file = $upload_dir . basename($_FILES["zipfile"]["name"]);
-if (!move_uploaded_file($_FILES["zipfile"]["tmp_name"], $upload_file))
+if (!move_uploaded_file($_FILES["zipfile"]["tmp_name"], $upload_file)) {
+    DB::removeRecord("maptool", $_SESSION["version"], $_SESSION["checksum"]);
+    session_destroy();
     failure("Couldn't move uploaded file.");
+}
 
 // Decrypt the original file and write the new one right back on top of
 // the original!
@@ -225,16 +234,20 @@ $debuginfo = file_get_contents("zip://${upload_file}#debuginfo.txt");
 $exception = file_get_contents("zip://${upload_file}#exception.txt");
 
 // Make sure the client isn't trying to pull a fast one; verify that our
-// checksum matches what we expected it to be.
+// checksum matches what we expect it to be.
 $checksum = calcDigest($exception);
-if ($_SESSION["checksum"] !== $checksum)
+if ($_SESSION["checksum"] !== $checksum) {
+    DB::removeRecord("maptool", $_SESSION["version"], $_SESSION["checksum"]);
+    session_destroy();
     failure("Checksums don't match.");
+}
 
 // Everything looks good, so write the stacktrace where the developers
 // can find it.
-updateRecord("maptool", $_SESSION["version"], $checksum,
+DB::updateRecord("maptool", $_SESSION["version"], $checksum,
     $debuginfo, $exception);
 
 print("Success.\n");
+session_destroy();
 exit(0);
 ?>
